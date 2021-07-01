@@ -523,8 +523,8 @@ void DynamixelProtocal2(uint8_t *Memory, uint8_t MotorID, int16_t dataIn,
 
 			case 0x02://READ
 			{
-				uint16_t startAddr = (parameter[0]&0xFF)|(parameter[1]<<8 &0xFF);
-				uint16_t numberOfDataToRead = (parameter[2]&0xFF)|(parameter[3]<<8 &0xFF);
+				uint16_t startAddr = (parameter[0]&0xFF)|(parameter[1]<<8 &0xFF00);
+				uint16_t numberOfDataToRead = (parameter[2]&0xFF)|(parameter[3]<<8 &0xFF00);
 				uint8_t temp[] = {0xff,0xff,0xfd,0x00,0x00,0x00,0x00,0x55,0x00};
 				temp[4] = MotorID;
 				temp[5] = (numberOfDataToRead + 4) & 0xff ; // +inst+err+crc1+crc2
@@ -542,7 +542,7 @@ void DynamixelProtocal2(uint8_t *Memory, uint8_t MotorID, int16_t dataIn,
 			case 0x03://WRITE
 			{
 				//LAB
-				uint16_t startAddr = (parameter[0]&0xFF)|(parameter[1]<<8 &0xFF);			//parameter 0 and 1 of write instruction will be starting address
+				uint16_t startAddr = (parameter[0]&0xFF)|(parameter[1]<<8 &0xFF00);			//parameter 0 and 1 of write instruction will be starting address
 																							//(0 will be low order and 1 will be high order) and to write we
 																							//need to know where we will start write
 				uint8_t temp[] = {0xff,0xff,0xfd,0x00,0x00,0x04,0x00,0x55,0x00,0x00,0x00};	//we build an array for status packet to send back while 4 headers
@@ -559,7 +559,7 @@ void DynamixelProtocal2(uint8_t *Memory, uint8_t MotorID, int16_t dataIn,
 				}
 				else
 				{
-					temp[5] = 5;
+					temp[5] = 4;
 				}
 				uint16_t crc_calc = update_crc(0, temp, 9);									//calculate crc for status packet
 				temp[9] = crc_calc & 0xff;													//put low order crc that calculated in status packet
