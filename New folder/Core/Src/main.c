@@ -36,6 +36,7 @@
 /* USER CODE BEGIN PD */
 //#define UARTDEBUG
 #define MAX_PACKET_LEN 255
+#define MEMORY_MAX 255
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -63,22 +64,24 @@ typedef struct _UartStructure
 UARTStucrture UART2 =
 { 0 };
 
-uint8_t MainMemory[255] =
+uint8_t MainMemory[MEMORY_MAX] =
 { 0 };
 
 typedef enum
 {
-	DNMXP_idle,
-	DNMXP_1stHeader,
-	DNMXP_2ndHeader,
-	DNMXP_3rdHeader,
-	DNMXP_Reserved,
-	DNMXP_ID,
-	DNMXP_LEN1,
-	DNMXP_LEN2,
-	DNMXP_Inst,
-	DNMXP_ParameterCollect,
-	DNMXP_CRCAndExecute
+	DNMXP_idle,			//Header 1 data
+	DNMXP_1stHeader,	//Header 2 data
+	DNMXP_2ndHeader,	//Header 3 data
+	DNMXP_3rdHeader,	//Reserved data -> MotorID / 0xFE (all device execute instruction (only working when PING , sync read ,bulk read only))
+	DNMXP_Reserved,		//ID data
+	DNMXP_ID,			//LEN1 data -> datalen
+	DNMXP_LEN1,			//datalen |= (LEN2 data << 8)
+	DNMXP_LEN2,			//inst data
+	DNMXP_Inst,			//check datalen if more than 3 -> has parameter and go to parametercollect state ... else -> no parameter skip parametercollect state
+						//to CRCAndExecute
+	DNMXP_ParameterCollect,	//collect parameter in array until collect all parameter
+	DNMXP_CRCAndExecute		//check CRC is correct or not if correct went to instruction 0x01 (Ping) 0x02 (Read) 0x03 (Write) according to inst data if none
+							//of this is match sent to error if incorrect error
 
 } DNMXPState;
 /* USER CODE END PV */
@@ -539,9 +542,30 @@ void DynamixelProtocal2(uint8_t *Memory, uint8_t MotorID, int16_t dataIn,
 			case 0x03://WRITE
 			{
 				//LAB
-				uint8_t temp[] = {0xff,0xff,0xfd,0x00,0x00,0x00,0x00,0x55,0x00};
-				temp[4] = MotorID;
-
+				uint16_t startAddr = (parameter[0]&0xFF)|(parameter[1]<<8 &0xFF);			//parameter 0 and 1 of write instruction will be starting address
+																							//(0 will be low order and 1 will be high order) and to write we
+																							//need to know where we will start write
+				uint8_t temp[] = {0xff,0xff,0xfd,0x00,0x00,0x04,0x00,0x55,0x00,0x00,0x00};	//we build an array for status packet to send back while 4 headers
+																							//(+ reserved) need to be ff ff fd 00 and len1 = 4 len2 = 0
+																							//because status packet will have only inst error crc1 crc2
+																							//and mode will be 55 status(return)
+				temp[4] = MotorID;															//put motor ID in status packet
+				if(startAddr + CollectedData - 2 <= MEMORY_MAX)
+				{
+					for(uint16_t k = 0; k < CollectedData-2; k++)								//loop for writing a value in memory
+					{
+						Memory[startAddr + k] = parameter[k+2];									//parameter must start from 2 because 0 and 1 is start address
+					}
+				}
+				else
+				{
+					temp[5] = 5;
+				}
+				uint16_t crc_calc = update_crc(0, temp, 9);									//calculate crc for status packet
+				temp[9] = crc_calc & 0xff;													//put low order crc that calculated in status packet
+				temp[10] = (crc_calc >> 8) & 0xFF;											//put high order crc that calculated in status packet
+				UARTTxWrite(uart, temp, 11);												//return status packet
+				break;
 			}
 			default: //Unknown Inst
 			{
@@ -573,6 +597,9 @@ void DynamixelProtocal2(uint8_t *Memory, uint8_t MotorID, int16_t dataIn,
 	}
 
 }
+//data_blk_ptr : Packet array pointer
+//data_blk_size : number of bytes in the Packet excluding the CRC
+//data_blk_size = Header(3) + Reserved(1) + Packet ID(1) + Packet Length(2) + //Packet Length - CRC(2) = 3 + 1 + 1 + 2 + Pakcet Length - 2 = 5 + Packet Length;
 unsigned short update_crc(unsigned short crc_accum, unsigned char *data_blk_ptr,
 		unsigned short data_blk_size)
 {
